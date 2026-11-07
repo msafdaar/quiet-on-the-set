@@ -1,0 +1,70 @@
+name: Build Windows Installer
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore QuietOnTheSetUI\QuietOnTheSetUI.sln
+
+      - name: Build release
+        run: msbuild QuietOnTheSetUI\QuietOnTheSetUI.sln /m /p:Configuration=Release /p:Platform="Any CPU"
+
+      - name: Verify application build output
+        shell: pwsh
+        run: |
+          foreach ($file in @("QuietOnTheSetUI\bin\Release\QuietOnTheSetUI.exe", "QuietOnTheSetUI\bin\Release\NAudio.dll")) {
+            if (-not (Test-Path $file)) { throw "Missing build output: $file" }
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $command = Get-Command iscc -ErrorAction SilentlyContinue
+            if (-not $command) { throw "Inno Setup compiler (ISCC.exe) not found" }
+            $iscc = $command.Source
+          }
+          & $iscc "innosetup.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "Output\setup.exe")) { throw "Installer was not generated at Output\setup.exe" }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build
+          body: |
+            Windows installer built from ${{ github.sha }} on ${{ github.ref_name }}.
+          files: Output/setup.exe
+          overwrite_files: true
+          make_latest: true
+          fail_on_unmatched_files: true
