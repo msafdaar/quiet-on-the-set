@@ -20,8 +20,11 @@ namespace QuietOnTheSetUI
         MMDevice mmDevice;
         private bool _isLocked = false;
         private string _password;
-        private int _maxVolume;
+        private int _masterMaxVolume;
         private bool _exitAllowed = false;
+        private HourlySchedule _hourlySchedule;
+        private readonly object _scheduleLock = new object();
+        private bool _loadingSchedule;
 
         // Removes the app from Alt+Tab window if minimized
         protected override CreateParams CreateParams
@@ -77,9 +80,13 @@ namespace QuietOnTheSetUI
             notifyIcon1.Icon = QuietOnTheSetUI.Properties.Resources.appicon;
             volumeTrackBar.ValueChanged += VolumeTrackBar_ValueChanged;
             mmDevice.AudioEndpointVolume.OnVolumeNotification += AudioEndpointVolume_OnVolumeNotification;
-            _maxVolume = Convert.ToInt16(Properties.Settings.Default["MaxVolume"]);
-            volumeTrackBar.Value = _maxVolume;
+            _masterMaxVolume = Convert.ToInt16(Properties.Settings.Default["MaxVolume"]);
+            volumeTrackBar.Value = _masterMaxVolume;
             _isLocked = Convert.ToBoolean(Properties.Settings.Default["IsLocked"]);
+            _hourlySchedule = HourlyScheduleStore.Load();
+            _loadingSchedule = true;
+            checkBoxSchedules.Checked = _hourlySchedule.Enabled;
+            _loadingSchedule = false;
             _password = Properties.Settings.Default["UnlockCode"].ToString();
             currentVolumeLabel.Text = Convert.ToInt16(mmDevice.AudioEndpointVolume.MasterVolumeLevelScalar * 100).ToString();
             notifyIcon1.BalloonTipTitle = $"Quiet on the Set";
@@ -95,6 +102,7 @@ namespace QuietOnTheSetUI
             this.FormClosing += Form1_FormClosing;
             this.Resize += Form1_Resize;
 
+            scheduleTimer.Start();
             UpdateFooter();
         }
 
@@ -135,10 +143,12 @@ namespace QuietOnTheSetUI
             _isLocked = true;
             lockButton.Text = "Unlock";
             volumeTrackBar.Enabled = false;
+            checkBoxSchedules.Enabled = false;
+            editScheduleButton.Enabled = false;
             if (!initializing)
             {
-                _maxVolume = volumeTrackBar.Value;
-                Properties.Settings.Default["MaxVolume"] = _maxVolume.ToString();
+                _masterMaxVolume = volumeTrackBar.Value;
+                Properties.Settings.Default["MaxVolume"] = _masterMaxVolume.ToString();
                 Properties.Settings.Default["IsLocked"] = true;
                 Properties.Settings.Default["UnlockCode"] = passwordTextBox.Text;
                 Properties.Settings.Default.Save();
@@ -151,12 +161,15 @@ namespace QuietOnTheSetUI
             if (_password.Length > 0) { lockButton.Enabled = false; }
             exitButton.Visible = false;
             SetMaxVolume();
+            UpdateMaxVolumeLabel();
         }
         internal void UnlockVolume()
         {
             _isLocked = false;
             lockButton.Text = "Lock";
             volumeTrackBar.Enabled = true;
+            checkBoxSchedules.Enabled = true;
+            editScheduleButton.Enabled = true;
             Properties.Settings.Default["IsLocked"] = false;
             Properties.Settings.Default["UnlockCode"] = string.Empty;
             Properties.Settings.Default.Save();
@@ -166,6 +179,7 @@ namespace QuietOnTheSetUI
             notifyIcon1.Text = _balloonTipText;
             exitButton.Visible = true;
             _password = string.Empty;
+            UpdateMaxVolumeLabel();
         }
 
         private string _balloonTipText
@@ -174,7 +188,8 @@ namespace QuietOnTheSetUI
             {
                 if (_isLocked)
                 {
-                    return $"Maximum volume locked at {volumeTrackBar.Value}";
+                    string scheduleSuffix = IsScheduleOverrideActive() ? " (time schedule)" : string.Empty;
+                    return $"Maximum volume locked at {GetEffectiveMaxVolume()}{scheduleSuffix}";
                 }
                 else
                 {
@@ -183,18 +198,58 @@ namespace QuietOnTheSetUI
             }
         }
 
+        private int GetEffectiveMaxVolume()
+        {
+            if (!_isLocked)
+            {
+                return _masterMaxVolume;
+            }
+
+            lock (_scheduleLock)
+            {
+                if (_hourlySchedule == null || !_hourlySchedule.Enabled)
+                {
+                    return _masterMaxVolume;
+                }
+
+                int hourLimit = _hourlySchedule.GetLimit(DateTime.Now.Hour);
+                return hourLimit == HourlySchedule.UseMasterLimit ? _masterMaxVolume : hourLimit;
+            }
+        }
+
+        private bool IsScheduleOverrideActive()
+        {
+            if (!_isLocked)
+            {
+                return false;
+            }
+
+            lock (_scheduleLock)
+            {
+                return _hourlySchedule != null
+                    && _hourlySchedule.Enabled
+                    && _hourlySchedule.GetLimit(DateTime.Now.Hour) != HourlySchedule.UseMasterLimit;
+            }
+        }
+
         private void SetMaxVolume()
         {
-            if (mmDevice.AudioEndpointVolume.MasterVolumeLevelScalar > (_maxVolume / 100f))
+            int effectiveMaxVolume = GetEffectiveMaxVolume();
+            if (mmDevice.AudioEndpointVolume.MasterVolumeLevelScalar > (effectiveMaxVolume / 100f))
             {
-                mmDevice.AudioEndpointVolume.MasterVolumeLevelScalar = _maxVolume / 100f;
+                mmDevice.AudioEndpointVolume.MasterVolumeLevelScalar = effectiveMaxVolume / 100f;
             }
+        }
+
+        private void UpdateMaxVolumeLabel()
+        {
+            maxVolumeLabel.Text = GetEffectiveMaxVolume().ToString();
         }
 
         private void AudioEndpointVolume_OnVolumeNotification(AudioVolumeNotificationData data)
         {
             var newVolume = Convert.ToInt16(data.MasterVolume * 100);
-            if (_isLocked && newVolume > _maxVolume)
+            if (_isLocked && newVolume > GetEffectiveMaxVolume())
             {
                 SetMaxVolume();
             }
@@ -206,13 +261,95 @@ namespace QuietOnTheSetUI
 
         private void VolumeTrackBar_ValueChanged(object sender, EventArgs e)
         {
-            maxVolumeLabel.Text = volumeTrackBar.Value.ToString();
+            UpdateMaxVolumeLabel();
         }
 
         private void volumeTrackBar_Scroll(object sender, EventArgs e)
         {
-            var trackBar = (TrackBar)sender;
-            maxVolumeLabel.Text = trackBar.Value.ToString();
+            UpdateMaxVolumeLabel();
+        }
+
+        private void scheduleTimer_Tick(object sender, EventArgs e)
+        {
+            RefreshScheduleState();
+        }
+
+        private void RefreshScheduleState()
+        {
+            UpdateMaxVolumeLabel();
+            if (_isLocked)
+            {
+                SetMaxVolume();
+            }
+
+            notifyIcon1.BalloonTipText = _balloonTipText;
+            notifyIcon1.Text = _balloonTipText;
+        }
+
+        private void checkBoxSchedules_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_loadingSchedule || _hourlySchedule == null)
+            {
+                return;
+            }
+
+            HourlySchedule scheduleToSave;
+            lock (_scheduleLock)
+            {
+                _hourlySchedule.Enabled = checkBoxSchedules.Checked;
+                scheduleToSave = _hourlySchedule.Clone();
+            }
+
+            SaveSchedule(scheduleToSave);
+            RefreshScheduleState();
+        }
+
+        private void editScheduleButton_Click(object sender, EventArgs e)
+        {
+            if (_isLocked)
+            {
+                return;
+            }
+
+            HourlySchedule workingCopy;
+            lock (_scheduleLock)
+            {
+                workingCopy = _hourlySchedule.Clone();
+            }
+
+            using (var form = new HourlyScheduleForm(workingCopy))
+            {
+                if (form.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                HourlySchedule updated = form.Schedule.Clone();
+                lock (_scheduleLock)
+                {
+                    _hourlySchedule = updated;
+                }
+
+                SaveSchedule(updated);
+                RefreshScheduleState();
+            }
+        }
+
+        private void SaveSchedule(HourlySchedule schedule)
+        {
+            try
+            {
+                HourlyScheduleStore.Save(schedule);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    "Could not save the time schedule: " + ex.Message,
+                    "Time Schedule",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         private void lockButton_Click(object sender, EventArgs e)

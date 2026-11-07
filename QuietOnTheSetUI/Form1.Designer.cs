@@ -48,6 +48,9 @@
             this.checkBox1 = new System.Windows.Forms.CheckBox();
             this.footerLabel = new System.Windows.Forms.Label();
             this.checkBox2 = new System.Windows.Forms.CheckBox();
+            this.checkBoxSchedules = new System.Windows.Forms.CheckBox();
+            this.editScheduleButton = new System.Windows.Forms.Button();
+            this.scheduleTimer = new System.Windows.Forms.Timer(this.components);
             ((System.ComponentModel.ISupportInitialize)(this.volumeTrackBar)).BeginInit();
             this.panel1.SuspendLayout();
             this.panel2.SuspendLayout();
@@ -150,7 +153,7 @@
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(765, 38);
             this.label3.TabIndex = 9;
-            this.label3.Text = "Slide this to pick the maximum volume";
+            this.label3.Text = "Slide this to pick the master maximum volume";
             this.label3.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             // 
             // label4
@@ -253,11 +256,41 @@
             this.checkBox2.UseVisualStyleBackColor = true;
             this.checkBox2.CheckedChanged += new System.EventHandler(this.checkBox2_CheckedChanged);
             // 
+            // checkBoxSchedules
+            // 
+            this.checkBoxSchedules.AutoSize = true;
+            this.checkBoxSchedules.Font = new System.Drawing.Font("Calibri", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.checkBoxSchedules.Location = new System.Drawing.Point(167, 190);
+            this.checkBoxSchedules.Name = "checkBoxSchedules";
+            this.checkBoxSchedules.Size = new System.Drawing.Size(147, 23);
+            this.checkBoxSchedules.TabIndex = 17;
+            this.checkBoxSchedules.Text = "Use time schedule";
+            this.checkBoxSchedules.UseVisualStyleBackColor = true;
+            this.checkBoxSchedules.CheckedChanged += new System.EventHandler(this.checkBoxSchedules_CheckedChanged);
+            // 
+            // editScheduleButton
+            // 
+            this.editScheduleButton.Font = new System.Drawing.Font("Calibri", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.editScheduleButton.Location = new System.Drawing.Point(422, 186);
+            this.editScheduleButton.Name = "editScheduleButton";
+            this.editScheduleButton.Size = new System.Drawing.Size(95, 30);
+            this.editScheduleButton.TabIndex = 18;
+            this.editScheduleButton.Text = "Edit...";
+            this.editScheduleButton.UseVisualStyleBackColor = true;
+            this.editScheduleButton.Click += new System.EventHandler(this.editScheduleButton_Click);
+            // 
+            // scheduleTimer
+            // 
+            this.scheduleTimer.Interval = 15000;
+            this.scheduleTimer.Tick += new System.EventHandler(this.scheduleTimer_Tick);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(763, 418);
+            this.Controls.Add(this.editScheduleButton);
+            this.Controls.Add(this.checkBoxSchedules);
             this.Controls.Add(this.checkBox2);
             this.Controls.Add(this.footerLabel);
             this.Controls.Add(this.checkBox1);
@@ -306,6 +339,9 @@
         private System.Windows.Forms.CheckBox checkBox1;
         private System.Windows.Forms.Label footerLabel;
         private System.Windows.Forms.CheckBox checkBox2;
+        private System.Windows.Forms.CheckBox checkBoxSchedules;
+        private System.Windows.Forms.Button editScheduleButton;
+        private System.Windows.Forms.Timer scheduleTimer;
     }
 }
 
